@@ -1,14 +1,16 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GADTs, Rank2Types #-}
 -- | Provide a notion of fanout wherein a single input is passed to
 -- several consumers.
 module Data.Machine.Fanout (fanout, fanoutSteps) where
 import Control.Applicative
 import Control.Arrow
 import Control.Monad (foldM)
+import Control.Monad.Trans (lift)
+import Data.Foldable (foldlM)
 import Data.Machine
 import Data.Maybe (catMaybes)
 import Data.Monoid
-import Data.Semigroup (Semigroup(sconcat))
+import Data.Semigroup (Semigroup(sconcat), WrappedMonoid(..))
 import Data.List.NonEmpty (NonEmpty((:|)))
 
 -- | Feed a value to a 'ProcessT' at an 'Await' 'Step'. If the
@@ -37,12 +39,27 @@ flushYields = go id
         go rs Stop = return (rs [], Nothing)
         go rs s = return (rs [], Just $ encased s)
 
+-- | Run a list of processes in order, combining any yields into
+-- a single yield
+runAll :: (Functor m, Monad m, Semigroup r)
+       => [ProcessT m a r] -> SourceT m r
+runAll xs = construct $ do
+  rs <- lift $ foldlM (\rs -> fmap (++ rs) . runT) [] xs
+  case rs of
+    [] -> return ()
+    (r:rs') -> yield . sconcat $ r :| rs'
+
+-- | Like 'runAll', but for monoids
+runAll' :: (Functor m, Monad m, Monoid r)
+        => [ProcessT m a r] -> SourceT m r
+runAll' xs = (unwrapMonoid <$>) . runAll $ (WrapMonoid <$>) <$> xs
+
 -- | Share inputs with each of a list of processes in lockstep. Any
 -- values yielded by the processes are combined into a single yield
 -- from the composite process.
 fanout :: (Functor m, Monad m, Semigroup r)
        => [ProcessT m a r] -> ProcessT m a r
-fanout xs = encased $ Await (MachineT . aux) Refl (fanout xs)
+fanout xs = encased $ Await (MachineT . aux) Refl (runAll xs)
   where aux y = do (rs,xs') <- mapM (feed y) xs >>= mapAccumLM yields []
                    let nxt = fanout $ catMaybes xs'
                    case rs of
@@ -61,7 +78,7 @@ fanout xs = encased $ Await (MachineT . aux) Refl (fanout xs)
 -- followed by a 'taking' process.
 fanoutSteps :: (Functor m, Monad m, Monoid r)
             => [ProcessT m a r] -> ProcessT m a r
-fanoutSteps xs = encased $ Await (MachineT . aux) Refl (fanoutSteps xs)
+fanoutSteps xs = encased $ Await (MachineT . aux) Refl (runAll' xs)
   where aux y = do (rs,xs') <- mapM (feed y) xs >>= mapAccumLM yields []
                    let nxt = fanoutSteps $ catMaybes xs'
                    if null rs
