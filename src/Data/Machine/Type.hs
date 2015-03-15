@@ -141,14 +141,14 @@ appliedTo mis blocking ss f g m n = MachineT $ runMachineT m >>= \v -> case v of
         | otherwise ->
 -}
 
--- | Stop feeding input into model, taking only the effects.
+-- | Stop feeding input into machine, taking only the effects.
 runT_ :: Monad m => MachineT m k b -> m ()
 runT_ m = runMachineT m >>= \v -> case v of
   Stop        -> return ()
   Yield _ k   -> runT_ k
   Await _ _ e -> runT_ e
 
--- | Stop feeding input into model and extract an answer
+-- | Stop feeding input into machine and extract an answer
 runT :: Monad m => MachineT m k b -> m [b]
 runT (MachineT m) = m >>= \v -> case v of
   Stop        -> return []
@@ -185,7 +185,7 @@ fitM f (MachineT m) = MachineT $ f (liftM aux m)
         aux (Yield o k) = Yield o (fitM f k)
         aux (Await g kg gg) = Await (fitM f . g) kg (fitM f gg)
 
--- | Compile a machine to a model.
+-- | Compile a plan to a machine.
 construct :: Monad m => PlanT k o m a -> MachineT m k o
 construct m = MachineT $ runPlanT m
   (const (return Stop))
@@ -193,7 +193,8 @@ construct m = MachineT $ runPlanT m
   (\f k g -> return (Await (MachineT . f) k (MachineT g)))
   (return Stop)
 
--- | Generates a model that runs a machine until it stops, then start it up again.
+-- | Generates a machine that restarts its plan when it hits the end of the plan.
+-- (After a 'Stop', however, the machine will not be restarted.)
 --
 -- @'repeatedly' m = 'construct' ('Control.Monad.forever' m)@
 repeatedly :: Monad m => PlanT k o m a -> MachineT m k o
@@ -204,7 +205,7 @@ repeatedly m = r where
     (\f k g -> return (Await (MachineT . f) k (MachineT g)))
     (return Stop)
 
--- | Evaluate a machine until it stops, and then yield answers according to the supplied model.
+-- | Evaluate a machine until it stops, and then yield answers according to the supplied plan.
 before :: Monad m => MachineT m k o -> PlanT k o m a -> MachineT m k o
 before (MachineT n) m = MachineT $ runPlanT m
   (const n)
