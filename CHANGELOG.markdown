@@ -1,3 +1,7 @@
+0.4.1.1
+-------
+* Fixed behavior of fanout when end of input reached
+
 0.4.1
 -----
 * Support `void` 0.7, fixed upper bounds on dependencies going forward.
