@@ -48,7 +48,7 @@ module Data.Machine.Type
 
 import Control.Applicative
 import Control.Category
-import Control.Monad (liftM)
+import Control.Monad (forever, liftM)
 import Data.Foldable
 import Data.Functor.Identity
 import Data.Machine.Plan
@@ -195,7 +195,8 @@ construct m = MachineT $ runPlanT m
 
 -- | Generates a model that runs a machine until it stops, then start it up again.
 --
--- @'repeatedly' m = 'construct' ('Control.Monad.forever' m)@
+-- The only difference between 'construct . forever' and 'repeatedly' is that 
+-- counterintuitively, 'construct . forever' honors a stop, but 'repeatedly' ignores it.
 repeatedly :: Monad m => PlanT k o m a -> MachineT m k o
 repeatedly m = r where
   r = MachineT $ runPlanT m
@@ -223,7 +224,7 @@ before (MachineT n) m = MachineT $ runPlanT m
 -- 'pass' 'Data.Machine.Wye.Z'  :: 'Data.Machine.Wye.Wye' a b (Either a b)
 -- @
 pass :: k o -> Machine k o
-pass k = repeatedly $ do
+pass k = construct . forever $ do
   a <- awaits k
   yield a
 

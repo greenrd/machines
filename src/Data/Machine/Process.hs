@@ -51,7 +51,7 @@ module Data.Machine.Process
 
 import Control.Applicative
 import Control.Category
-import Control.Monad (liftM, when, replicateM_)
+import Control.Monad (forever, liftM, when, replicateM_)
 import Control.Monad.Trans.Class
 import Data.Foldable hiding (fold)
 import Data.Machine.Is
@@ -82,16 +82,14 @@ class Automaton k where
   auto :: k a b -> Process a b
 
 instance Automaton (->) where
-  auto f = repeatedly $ do
-    i <- await
-    yield (f i)
+  auto = mapping
 
 instance Automaton Is where
   auto Refl = echo
 
 -- | The trivial 'Process' that simply repeats each input it receives.
 echo :: Process a a
-echo = repeatedly $ do
+echo = construct . forever $ do
   i <- await
   yield i
 
@@ -101,7 +99,7 @@ prepended = before echo . traverse_ yield
 
 -- | A 'Process' that only passes through inputs that match a predicate.
 filtered :: (a -> Bool) -> Process a a
-filtered p = repeatedly $ do
+filtered p = construct . forever $ do
   i <- await
   when (p i) $ yield i
 
@@ -115,7 +113,7 @@ taking n = construct . replicateM_ n $ await >>= yield
 
 -- | A 'Process' that passes through elements until a predicate ceases to hold, then stops
 takingWhile :: (a -> Bool) -> Process a a
-takingWhile p = repeatedly $ await >>= \v -> if p v then yield v else stop
+takingWhile p = construct . forever $ await >>= \v -> if p v then yield v else stop
 
 -- | A 'Process' that drops elements while a predicate holds
 droppingWhile :: (a -> Bool) -> Process a a
@@ -126,7 +124,7 @@ droppingWhile p = before echo loop where
 --
 -- Avoids returning empty lists and deals with the truncation of the final group.
 buffered :: Int -> Process a [a]
-buffered = repeatedly . go [] where
+buffered = construct . forever . go [] where
   go [] 0  = stop
   go acc 0 = yield (reverse acc)
   go acc n = do
@@ -225,7 +223,7 @@ fold1 func = scan1 func ~> final
 -- | Break each input into pieces that are fed downstream
 -- individually.
 asParts :: Foldable f => Process (f a) a
-asParts = repeatedly $ await >>= mapM_ yield
+asParts = construct . forever $ await >>= mapM_ yield
 
 -- | @sinkPart_ toParts sink@ creates a process that uses the
 -- @toParts@ function to break input into a tuple of @(passAlong,
@@ -245,7 +243,7 @@ sinkPart_ p = go
 
 -- | Apply a monadic function to each element of a 'ProcessT'.
 autoM :: Monad m => (a -> m b) -> ProcessT m a b
-autoM f = repeatedly $ await >>= lift . f >>= yield
+autoM f = construct . forever $ await >>= lift . f >>= yield
 
 -- |
 -- Skip all but the final element of the input
@@ -299,7 +297,7 @@ smallest = fold1 min
 -- |
 -- Convert a stream of actions to a stream of values
 sequencing :: (Category k, Monad m) => MachineT m (k (m a)) a
-sequencing = repeatedly $ do
+sequencing = construct . forever $ do
   ma <- await
   a  <- lift ma
   yield a
@@ -307,13 +305,13 @@ sequencing = repeatedly $ do
 -- |
 -- Apply a function to all values coming from the input
 mapping :: Category k => (a -> b) -> Machine (k a) b
-mapping f = repeatedly $ await >>= yield . f
+mapping f = construct . forever $ await >>= yield . f
 
 -- |
 -- Parse 'Read'able values, only emitting the value if the parse succceeds.
 -- This 'Machine' stops at first parsing error
 reading :: (Category k, Read a) => Machine (k String) a
-reading = repeatedly $ do
+reading = construct . forever $ do
   s <- await
   case reads s of
     [(a, "")] -> yield a
